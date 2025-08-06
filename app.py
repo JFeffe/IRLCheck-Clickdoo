@@ -159,8 +159,10 @@ def initialize_session_state():
 
 # Cache AI detection results
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def cached_ai_detection(image):
+def cached_ai_detection(image_bytes):
     """Cache AI detection results to avoid recomputation"""
+    # Convert bytes back to PIL Image for AI detection
+    image = Image.open(io.BytesIO(image_bytes))
     return detect_ai_generation_simple(image)
 
 # Cache metadata extraction
@@ -271,7 +273,7 @@ def main():
                     # Step 3: AI detection
                     status_text.text("🤖 Running AI detection...")
                     progress_bar.progress(60)
-                    ai_result = cached_ai_detection(image) if enable_ai else {
+                    ai_result = cached_ai_detection(uploaded_file.getvalue()) if enable_ai else {
                         'ai_probability': 0,
                         'confidence': 0,
                         'model_used': 'Disabled',
