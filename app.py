@@ -15,7 +15,9 @@ import plotly.express as px
 import pandas as pd
 import time
 import os
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
+import hashlib
 
 # Import AI detection with caching
 try:
@@ -143,6 +145,28 @@ st.markdown("""
         margin: 1rem 0;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
+    
+    .history-item {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 4px solid #FF6B6B;
+        transition: all 0.3s ease;
+    }
+    
+    .history-item:hover {
+        background: #e9ecef;
+        transform: translateX(5px);
+    }
+    
+    .batch-progress {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -158,6 +182,10 @@ def initialize_session_state():
         st.session_state.analysis_complete = False
     if 'analysis_progress' not in st.session_state:
         st.session_state.analysis_progress = 0
+    if 'analysis_history' not in st.session_state:
+        st.session_state.analysis_history = []
+    if 'batch_results' not in st.session_state:
+        st.session_state.batch_results = []
 
 # Cache AI detection results
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -173,6 +201,99 @@ def cached_metadata_extraction(image_bytes):
     """Cache metadata extraction results"""
     return extract_metadata(image_bytes)
 
+def generate_file_hash(image_bytes):
+    """Generate a unique hash for the image file"""
+    return hashlib.md5(image_bytes).hexdigest()
+
+def save_to_history(results):
+    """Save analysis results to history"""
+    if 'analysis_history' not in st.session_state:
+        st.session_state.analysis_history = []
+    
+    # Add timestamp and file hash
+    results['id'] = generate_file_hash(results.get('image_bytes', b''))
+    results['timestamp'] = datetime.now().isoformat()
+    
+    # Keep only last 50 analyses
+    st.session_state.analysis_history = st.session_state.analysis_history[-49:] + [results]
+
+def load_from_history(history_id):
+    """Load analysis results from history"""
+    for item in st.session_state.analysis_history:
+        if item.get('id') == history_id:
+            return item
+    return None
+
+def batch_analyze_images(uploaded_files, max_file_size, enable_metadata, enable_editing, enable_ai):
+    """Analyze multiple images in batch"""
+    batch_results = []
+    total_files = len(uploaded_files)
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, uploaded_file in enumerate(uploaded_files):
+        try:
+            status_text.text(f"Analyzing {uploaded_file.name} ({i+1}/{total_files})")
+            
+            # Check file size
+            file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
+            if file_size > max_file_size:
+                batch_results.append({
+                    'filename': uploaded_file.name,
+                    'status': 'error',
+                    'error': f'File too large ({file_size:.1f}MB > {max_file_size}MB)'
+                })
+                continue
+            
+            # Analyze image
+            image = Image.open(uploaded_file)
+            
+            # Extract metadata
+            metadata = cached_metadata_extraction(uploaded_file.getvalue()) if enable_metadata else {}
+            
+            # Detect editing
+            editing_result = detect_editing(image) if enable_editing else {'probability': 0, 'confidence': 0}
+            
+            # AI detection
+            ai_result = cached_ai_detection(uploaded_file.getvalue()) if enable_ai else {
+                'ai_probability': 0,
+                'confidence': 0,
+                'model_used': 'Disabled',
+                'detection_methods': [],
+                'details': {}
+            }
+            
+            # Calculate overall score
+            ai_prob = ai_result['ai_probability']
+            editing_prob = editing_result['probability']
+            overall_score = 100 - ((ai_prob * 0.6) + (editing_prob * 0.4))
+            
+            batch_results.append({
+                'filename': uploaded_file.name,
+                'status': 'success',
+                'overall_score': overall_score,
+                'ai_probability': ai_prob,
+                'editing_probability': editing_prob,
+                'metadata': metadata,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            
+        except Exception as e:
+            batch_results.append({
+                'filename': uploaded_file.name,
+                'status': 'error',
+                'error': str(e)
+            })
+        
+        # Update progress
+        progress_bar.progress((i + 1) / total_files)
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    return batch_results
+
 def main():
     # Initialize session state
     if 'analysis_results' not in st.session_state:
@@ -183,6 +304,10 @@ def main():
         st.session_state.analysis_complete = False
     if 'analysis_progress' not in st.session_state:
         st.session_state.analysis_progress = 0
+    if 'analysis_history' not in st.session_state:
+        st.session_state.analysis_history = []
+    if 'batch_results' not in st.session_state:
+        st.session_state.batch_results = []
     
     # Header
     st.markdown("""
@@ -228,8 +353,53 @@ def main():
         **Max size:** {}MB
         """.format(max_file_size))
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        # History section
+        if st.session_state.analysis_history:
+            st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+            st.header("📚 Analysis History")
+            
+            # Show recent analyses
+            recent_history = st.session_state.analysis_history[-5:]  # Last 5
+            for item in reversed(recent_history):
+                filename = item.get('filename', 'Unknown')
+                timestamp = item.get('timestamp', '')
+                overall_score = item.get('overall_score', 0)
+                
+                if overall_score >= 80:
+                    status_emoji = "🟢"
+                elif overall_score >= 50:
+                    status_emoji = "🟡"
+                else:
+                    status_emoji = "🔴"
+                
+                st.markdown(f"""
+                <div class="history-item">
+                    <strong>{status_emoji} {filename}</strong><br>
+                    <small>Score: {overall_score:.1f}% | {timestamp}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            if st.button("🗑️ Clear History"):
+                st.session_state.analysis_history = []
+                st.rerun()
+            
+            st.markdown('</div>', unsafe_allow_html=True)
     
     # Main content
+    tab1, tab2, tab3 = st.tabs(["🔍 Single Analysis", "📦 Batch Analysis", "📊 Analytics"])
+    
+    with tab1:
+        display_single_analysis(max_file_size, enable_metadata, enable_editing, enable_ai)
+    
+    with tab2:
+        display_batch_analysis(max_file_size, enable_metadata, enable_editing, enable_ai)
+    
+    with tab3:
+        display_analytics()
+
+def display_single_analysis(max_file_size, enable_metadata, enable_editing, enable_ai):
+    """Display single image analysis interface"""
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -238,7 +408,8 @@ def main():
         uploaded_file = st.file_uploader(
             "📁 Drag and drop your image here or click to browse",
             type=['png', 'jpg', 'jpeg', 'webp'],
-            help="Upload an image to analyze its authenticity"
+            help="Upload an image to analyze its authenticity",
+            key="single_uploader"
         )
         st.markdown('</div>', unsafe_allow_html=True)
         
@@ -296,15 +467,26 @@ def main():
                     progress_bar.progress(80)
                     
                     # Store results in session state
-                    st.session_state.analysis_results = {
+                    results = {
                         'metadata': metadata,
                         'editing': editing_result,
                         'ai': ai_result,
                         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        'filename': uploaded_file.name
+                        'filename': uploaded_file.name,
+                        'image_bytes': uploaded_file.getvalue()
                     }
+                    
+                    # Calculate overall score
+                    ai_prob = ai_result['ai_probability']
+                    editing_prob = editing_result['probability']
+                    results['overall_score'] = 100 - ((ai_prob * 0.6) + (editing_prob * 0.4))
+                    
+                    st.session_state.analysis_results = results
                     st.session_state.uploaded_file = uploaded_file
                     st.session_state.analysis_complete = True
+                    
+                    # Save to history
+                    save_to_history(results)
                     
                     progress_bar.progress(100)
                     status_text.text("✅ Analysis complete!")
@@ -320,6 +502,172 @@ def main():
     # Display detailed results
     if st.session_state.analysis_complete and st.session_state.analysis_results:
         display_detailed_results(st.session_state.analysis_results)
+
+def display_batch_analysis(max_file_size, enable_metadata, enable_editing, enable_ai):
+    """Display batch analysis interface"""
+    st.header("📦 Batch Analysis")
+    st.markdown("Upload multiple images to analyze them all at once.")
+    
+    # Batch file uploader
+    uploaded_files = st.file_uploader(
+        "📁 Drag and drop multiple images here",
+        type=['png', 'jpg', 'jpeg', 'webp'],
+        accept_multiple_files=True,
+        help="Upload multiple images for batch analysis",
+        key="batch_uploader"
+    )
+    
+    if uploaded_files:
+        st.info(f"📁 {len(uploaded_files)} files selected for batch analysis")
+        
+        # Show file list
+        with st.expander("📋 File List", expanded=True):
+            for i, file in enumerate(uploaded_files):
+                file_size = len(file.getvalue()) / (1024 * 1024)
+                st.write(f"{i+1}. {file.name} ({file_size:.2f} MB)")
+        
+        # Batch analysis button
+        if st.button("🚀 Start Batch Analysis", type="primary", use_container_width=True):
+            st.session_state.batch_results = batch_analyze_images(
+                uploaded_files, max_file_size, enable_metadata, enable_editing, enable_ai
+            )
+    
+    # Display batch results
+    if st.session_state.batch_results:
+        st.header("📊 Batch Analysis Results")
+        
+        # Summary statistics
+        successful = [r for r in st.session_state.batch_results if r['status'] == 'success']
+        errors = [r for r in st.session_state.batch_results if r['status'] == 'error']
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Files", len(st.session_state.batch_results))
+        with col2:
+            st.metric("Successful", len(successful))
+        with col3:
+            st.metric("Errors", len(errors))
+        with col4:
+            if successful:
+                avg_score = sum(r['overall_score'] for r in successful) / len(successful)
+                st.metric("Avg Score", f"{avg_score:.1f}%")
+        
+        # Results table
+        if successful:
+            st.subheader("✅ Successful Analyses")
+            results_data = []
+            for result in successful:
+                results_data.append({
+                    'Filename': result['filename'],
+                    'Overall Score': f"{result['overall_score']:.1f}%",
+                    'AI Risk': f"{result['ai_probability']:.1f}%",
+                    'Editing': f"{result['editing_probability']:.1f}%",
+                    'Status': "🟢 Authentic" if result['overall_score'] >= 80 else "🟡 Suspicious" if result['overall_score'] >= 50 else "🔴 Fake"
+                })
+            
+            df = pd.DataFrame(results_data)
+            st.dataframe(df, use_container_width=True)
+        
+        # Error list
+        if errors:
+            st.subheader("❌ Errors")
+            for error in errors:
+                st.error(f"**{error['filename']}**: {error['error']}")
+        
+        # Download batch report
+        if st.button("📄 Download Batch Report", type="secondary"):
+            batch_report = generate_batch_report(st.session_state.batch_results)
+            st.download_button(
+                label="💾 Download Batch Report",
+                data=batch_report,
+                file_name=f"IRLCheck_Batch_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
+
+def display_analytics():
+    """Display analytics and statistics"""
+    st.header("📊 Analytics Dashboard")
+    
+    if not st.session_state.analysis_history:
+        st.info("No analysis history available. Run some analyses to see statistics.")
+        return
+    
+    # Convert history to DataFrame
+    history_data = []
+    for item in st.session_state.analysis_history:
+        if 'overall_score' in item:
+            history_data.append({
+                'filename': item.get('filename', 'Unknown'),
+                'overall_score': item.get('overall_score', 0),
+                'ai_probability': item.get('ai', {}).get('ai_probability', 0),
+                'editing_probability': item.get('editing', {}).get('probability', 0),
+                'timestamp': item.get('timestamp', ''),
+                'date': datetime.fromisoformat(item.get('timestamp', '')).date() if item.get('timestamp') else None
+            })
+    
+    if not history_data:
+        st.info("No valid analysis data found in history.")
+        return
+    
+    df = pd.DataFrame(history_data)
+    
+    # Summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Analyses", len(df))
+    with col2:
+        st.metric("Average Score", f"{df['overall_score'].mean():.1f}%")
+    with col3:
+        st.metric("Authentic Images", len(df[df['overall_score'] >= 80]))
+    with col4:
+        st.metric("Suspicious/Fake", len(df[df['overall_score'] < 80]))
+    
+    # Score distribution chart
+    st.subheader("📈 Score Distribution")
+    fig = px.histogram(df, x='overall_score', nbins=20, 
+                      title="Distribution of Authenticity Scores",
+                      labels={'overall_score': 'Authenticity Score (%)', 'count': 'Number of Images'})
+    fig.add_vline(x=80, line_dash="dash", line_color="green", annotation_text="Authentic Threshold")
+    fig.add_vline(x=50, line_dash="dash", line_color="orange", annotation_text="Suspicious Threshold")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Time series analysis
+    if 'date' in df.columns and df['date'].notna().any():
+        st.subheader("📅 Analysis Over Time")
+        daily_stats = df.groupby('date').agg({
+            'overall_score': ['mean', 'count'],
+            'ai_probability': 'mean',
+            'editing_probability': 'mean'
+        }).reset_index()
+        
+        daily_stats.columns = ['date', 'avg_score', 'count', 'avg_ai', 'avg_editing']
+        
+        fig = px.line(daily_stats, x='date', y='avg_score', 
+                     title="Average Authenticity Score Over Time",
+                     labels={'avg_score': 'Average Score (%)', 'date': 'Date'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Risk analysis
+    st.subheader("🎯 Risk Analysis")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig = px.scatter(df, x='ai_probability', y='editing_probability', 
+                        color='overall_score', size='overall_score',
+                        title="AI vs Editing Risk",
+                        labels={'ai_probability': 'AI Generation Risk (%)', 
+                               'editing_probability': 'Editing Detection (%)',
+                               'overall_score': 'Overall Score'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Top 10 most suspicious images
+        suspicious_df = df.nsmallest(10, 'overall_score')
+        fig = px.bar(suspicious_df, x='filename', y='overall_score',
+                    title="Top 10 Most Suspicious Images",
+                    labels={'overall_score': 'Authenticity Score (%)', 'filename': 'Filename'})
+        fig.update_xaxes(tickangle=45)
+        st.plotly_chart(fig, use_container_width=True)
 
 def display_quick_stats(results):
     """Display quick statistics in the sidebar"""
@@ -725,6 +1073,81 @@ def generate_pdf_report(results):
                 for key, value in data.items():
                     story.append(Paragraph(f"• {key}: {value}", styles['Normal']))
                 story.append(Spacer(1, 6))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def generate_batch_report(batch_results):
+    """Generate a comprehensive batch analysis PDF report"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=1
+    )
+    story.append(Paragraph("IRLCheck-Clickdoo Batch Analysis Report", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Summary
+    successful = [r for r in batch_results if r['status'] == 'success']
+    errors = [r for r in batch_results if r['status'] == 'error']
+    
+    summary_text = f"""
+    Batch Analysis Summary:
+    Total Files: {len(batch_results)}
+    Successful Analyses: {len(successful)}
+    Errors: {len(errors)}
+    Analysis Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    """
+    story.append(Paragraph("Executive Summary", styles['Heading2']))
+    story.append(Paragraph(summary_text, styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Successful results
+    if successful:
+        story.append(Paragraph("Successful Analyses", styles['Heading2']))
+        
+        # Create table
+        table_data = [['Filename', 'Overall Score', 'AI Risk', 'Editing', 'Status']]
+        for result in successful:
+            status = "Authentic" if result['overall_score'] >= 80 else "Suspicious" if result['overall_score'] >= 50 else "Fake"
+            table_data.append([
+                result['filename'],
+                f"{result['overall_score']:.1f}%",
+                f"{result['ai_probability']:.1f}%",
+                f"{result['editing_probability']:.1f}%",
+                status
+            ])
+        
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 20))
+    
+    # Errors
+    if errors:
+        story.append(Paragraph("Errors", styles['Heading2']))
+        for error in errors:
+            story.append(Paragraph(f"• {error['filename']}: {error['error']}", styles['Normal']))
+        story.append(Spacer(1, 20))
     
     # Build PDF
     doc.build(story)
