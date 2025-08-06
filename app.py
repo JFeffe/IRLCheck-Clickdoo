@@ -1,89 +1,80 @@
 import streamlit as st
-import os
-import tempfile
-from PIL import Image
-import exifread
 import cv2
 import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+from PIL import Image
+import exifread
+import io
+import base64
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-import io
-import base64
-import random
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import plotly.graph_objects as go
+import plotly.express as px
+import pandas as pd
+import time
+import os
+from datetime import datetime
 
-# Import AI detection module
+# Import AI detection with caching
 try:
     from ai_detection import detect_ai_generation_simple
     AI_DETECTION_AVAILABLE = True
 except ImportError:
     AI_DETECTION_AVAILABLE = False
-    st.warning("⚠️ AI detection module not available. Using fallback method.")
+    def detect_ai_generation_simple(image):
+        return {
+            'ai_probability': 50.0,
+            'confidence': 0.5,
+            'model_used': 'Fallback method',
+            'detection_methods': [],
+            'details': {}
+        }
 
-# Page configuration
+# Configure page
 st.set_page_config(
-    page_title="IRLCheck - Image Authenticity Detector",
+    page_title="IRLCheck-Clickdoo - Image Authenticity Detector",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for modern design
 st.markdown("""
 <style>
     .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        text-align: center;
-        color: #1f77b4;
+        background: linear-gradient(90deg, #FF6B6B, #4ECDC4);
+        padding: 2rem;
+        border-radius: 15px;
         margin-bottom: 2rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
     }
     
     .upload-area {
-        border: 3px dashed #1f77b4;
+        border: 3px dashed #FF6B6B;
         border-radius: 15px;
         padding: 3rem;
         text-align: center;
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        margin: 1rem 0;
+        background: linear-gradient(135deg, #f8f9fa, #e9ecef);
         transition: all 0.3s ease;
-        cursor: pointer;
+        margin-bottom: 2rem;
     }
     
     .upload-area:hover {
-        border-color: #764ba2;
-        background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+        border-color: #4ECDC4;
+        background: linear-gradient(135deg, #e9ecef, #f8f9fa);
         transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-    }
-    
-    .upload-area.dragover {
-        border-color: #28a745;
-        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     }
     
     .result-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-        border: 1px solid #e0e0e0;
+        background: white;
         border-radius: 15px;
         padding: 1.5rem;
         margin: 1rem 0;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-    }
-    
-    .result-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        border-left: 5px solid #FF6B6B;
     }
     
     .metric-card {
@@ -92,733 +83,641 @@ st.markdown("""
         padding: 1.5rem;
         border-radius: 15px;
         text-align: center;
-        margin: 0.5rem 0;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        transition: all 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
-    }
-    
-    .metric-card h3 {
-        margin: 0 0 0.5rem 0;
-        font-size: 1.1rem;
-        opacity: 0.9;
-    }
-    
-    .metric-card h2 {
-        margin: 0;
-        font-size: 2.5rem;
-        font-weight: bold;
-    }
-    
-    .metric-card p {
-        margin: 0.5rem 0 0 0;
-        opacity: 0.8;
-        font-size: 0.9rem;
+        margin: 0.5rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
     
     .status-authentic {
-        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        border-left-color: #28a745 !important;
+        background: linear-gradient(135deg, #d4edda, #c3e6cb);
     }
     
     .status-suspicious {
-        background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+        border-left-color: #ffc107 !important;
+        background: linear-gradient(135deg, #fff3cd, #ffeaa7);
     }
     
     .status-fake {
-        background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+        border-left-color: #dc3545 !important;
+        background: linear-gradient(135deg, #f8d7da, #f5c6cb);
     }
     
-    .progress-bar {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        height: 8px;
-        border-radius: 4px;
-        margin: 0.5rem 0;
-    }
-    
-    .file-info {
-        background: #f8f9fa;
-        border-radius: 10px;
+    .ai-method-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
         padding: 1rem;
-        margin: 1rem 0;
-        border-left: 4px solid #1f77b4;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
     
     .sidebar-section {
-        background: #f8f9fa;
+        background: white;
         border-radius: 10px;
         padding: 1rem;
         margin: 1rem 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
     
     .stButton > button {
-        border-radius: 10px;
+        background: linear-gradient(90deg, #FF6B6B, #4ECDC4);
+        color: white;
+        border: none;
+        border-radius: 25px;
+        padding: 0.75rem 2rem;
         font-weight: bold;
         transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
     
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
     }
     
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 10px 10px 0 0;
-        background-color: #f8f9fa;
-        border: none;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #1f77b4;
+    .file-info {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-    }
-    
-    .ai-method-card {
-        background: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
         padding: 1rem;
-        margin: 0.5rem 0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    .ai-method-card h4 {
-        margin: 0 0 0.5rem 0;
-        color: #1f77b4;
+        border-radius: 10px;
+        margin: 1rem 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'uploaded_file' not in st.session_state:
-    st.session_state.uploaded_file = None
-if 'analysis_results' not in st.session_state:
-    st.session_state.analysis_results = None
-if 'analysis_progress' not in st.session_state:
-    st.session_state.analysis_progress = 0
+# Initialize session state with caching
+@st.cache_resource
+def initialize_session_state():
+    """Initialize session state with caching for better performance"""
+    if 'analysis_results' not in st.session_state:
+        st.session_state.analysis_results = None
+    if 'uploaded_file' not in st.session_state:
+        st.session_state.uploaded_file = None
+    if 'analysis_complete' not in st.session_state:
+        st.session_state.analysis_complete = False
+
+# Cache AI detection results
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def cached_ai_detection(image):
+    """Cache AI detection results to avoid recomputation"""
+    return detect_ai_generation_simple(image)
+
+# Cache metadata extraction
+@st.cache_data(ttl=3600)
+def cached_metadata_extraction(image_bytes):
+    """Cache metadata extraction results"""
+    return extract_metadata(image_bytes)
 
 def main():
-    """Main application function"""
+    initialize_session_state()
     
     # Header
-    st.markdown('<h1 class="main-header">🔍 IRLCheck - Image Authenticity Detector</h1>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.markdown("""
+    <div class="main-header">
+        <h1 style="color: white; text-align: center; margin: 0;">🔍 IRLCheck-Clickdoo</h1>
+        <p style="color: white; text-align: center; margin: 0.5rem 0 0 0; font-size: 1.2rem;">
+            Advanced Image Authenticity Detection Tool with AI
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.header("📋 Settings")
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.header("⚙️ Settings")
         
-        with st.container():
-            st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-            max_file_size = st.slider("Max file size (MB)", 10, 100, 100)
-            st.info(f"Maximum file size: {max_file_size} MB")
-            st.markdown('</div>', unsafe_allow_html=True)
+        # AI Detection Status
+        ai_status = "🟢 Available" if AI_DETECTION_AVAILABLE else "🟡 Fallback Mode"
+        st.info(f"**AI Detection:** {ai_status}")
         
+        # File size limit
+        max_file_size = st.slider("Max file size (MB)", 10, 200, 100)
+        
+        # Analysis options
+        st.subheader("Analysis Options")
+        enable_metadata = st.checkbox("Metadata Analysis", value=True)
+        enable_editing = st.checkbox("Editing Detection", value=True)
+        enable_ai = st.checkbox("AI Detection", value=True, disabled=not AI_DETECTION_AVAILABLE)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # About section
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.header("ℹ️ About")
-        with st.container():
-            st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-            st.markdown("""
-            **IRLCheck** analyzes images to detect:
-            - 📸 **Metadata** (EXIF, GPS, camera info)
-            - ✂️ **Editing** (Photoshop, compression artifacts)
-            - 🤖 **AI Generation** (Stable Diffusion, DALL-E, etc.)
-            
-            Supported formats: JPG, JPEG, PNG, WEBP
-            """)
-            
-            # AI Detection Status
-            if AI_DETECTION_AVAILABLE:
-                st.success("✅ AI Detection: Available")
-            else:
-                st.warning("⚠️ AI Detection: Fallback mode")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("""
+        **IRLCheck-Clickdoo** is an advanced image authenticity detection tool that combines:
         
-        # Quick stats in sidebar
-        if st.session_state.analysis_results:
-            st.header("📊 Quick Stats")
-            display_quick_stats(st.session_state.analysis_results)
+        • **Metadata Analysis** - EXIF data extraction
+        • **Editing Detection** - Photoshop traces & artifacts
+        • **AI Detection** - AI-generated image identification
+        
+        **Supported formats:** PNG, JPG, JPEG, WEBP
+        **Max size:** {}MB
+        """.format(max_file_size))
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    # Main content area
+    # Main content
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.header("📁 Upload Image")
-        
-        # Enhanced upload area
+        # File upload area
+        st.markdown('<div class="upload-area">', unsafe_allow_html=True)
         uploaded_file = st.file_uploader(
-            "Drag and drop your image here or click to browse",
-            type=['jpg', 'jpeg', 'png', 'webp'],
-            help=f"Maximum file size: {max_file_size} MB",
-            key="file_uploader"
+            "📁 Drag and drop your image here or click to browse",
+            type=['png', 'jpg', 'jpeg', 'webp'],
+            help="Upload an image to analyze its authenticity"
         )
+        st.markdown('</div>', unsafe_allow_html=True)
         
+        # Display file information
         if uploaded_file is not None:
+            file_size = len(uploaded_file.getvalue()) / (1024 * 1024)  # MB
+            st.markdown(f"""
+            <div class="file-info">
+                <strong>📄 File Information:</strong><br>
+                • Name: {uploaded_file.name}<br>
+                • Size: {file_size:.2f} MB<br>
+                • Type: {uploaded_file.type}
+            </div>
+            """, unsafe_allow_html=True)
+            
             # Check file size
-            file_size_mb = uploaded_file.size / (1024 * 1024)
-            if file_size_mb > max_file_size:
-                st.error(f"File size ({file_size_mb:.1f} MB) exceeds the maximum allowed size ({max_file_size} MB)")
+            if file_size > max_file_size:
+                st.error(f"❌ File too large! Maximum size is {max_file_size}MB")
                 return
             
-            st.session_state.uploaded_file = uploaded_file
-            
-            # Display file info
-            with st.container():
-                st.markdown('<div class="file-info">', unsafe_allow_html=True)
-                st.write(f"**📁 File:** {uploaded_file.name}")
-                st.write(f"**📏 Size:** {file_size_mb:.1f} MB")
-                st.write(f"**📄 Type:** {uploaded_file.type}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Display uploaded image
-            st.subheader("📸 Uploaded Image")
+            # Display image
             image = Image.open(uploaded_file)
             st.image(image, caption="Uploaded Image", use_container_width=True)
             
-            # Analysis button with progress
+            # Analysis button
             if st.button("🔍 Analyze Image", type="primary", use_container_width=True):
-                with st.spinner("Analyzing image..."):
+                with st.spinner("🔄 Analyzing image..."):
                     # Progress bar
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    # Simulate progress
-                    for i in range(100):
-                        progress_bar.progress(i + 1)
-                        if i < 20:
-                            status_text.text("Extracting metadata...")
-                        elif i < 40:
-                            status_text.text("Analyzing image quality...")
-                        elif i < 70:
-                            status_text.text("Running AI detection...")
-                        elif i < 90:
-                            status_text.text("Combining results...")
-                        else:
-                            status_text.text("Finalizing analysis...")
+                    # Step 1: Extract metadata
+                    status_text.text("📊 Extracting metadata...")
+                    progress_bar.progress(20)
+                    metadata = cached_metadata_extraction(uploaded_file.getvalue()) if enable_metadata else {}
                     
-                    results = analyze_image(uploaded_file)
-                    st.session_state.analysis_results = results
+                    # Step 2: Detect editing
+                    status_text.text("✂️ Detecting editing traces...")
+                    progress_bar.progress(40)
+                    editing_result = detect_editing(image) if enable_editing else {'probability': 0, 'confidence': 0}
+                    
+                    # Step 3: AI detection
+                    status_text.text("🤖 Running AI detection...")
+                    progress_bar.progress(60)
+                    ai_result = cached_ai_detection(image) if enable_ai else {
+                        'ai_probability': 0,
+                        'confidence': 0,
+                        'model_used': 'Disabled',
+                        'detection_methods': [],
+                        'details': {}
+                    }
+                    
+                    # Step 4: Combine results
+                    status_text.text("🔄 Combining results...")
+                    progress_bar.progress(80)
+                    
+                    # Store results in session state
+                    st.session_state.analysis_results = {
+                        'metadata': metadata,
+                        'editing': editing_result,
+                        'ai': ai_result,
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'filename': uploaded_file.name
+                    }
+                    st.session_state.uploaded_file = uploaded_file
+                    st.session_state.analysis_complete = True
                     
                     progress_bar.progress(100)
-                    status_text.text("Analysis completed!")
-                    
-                    st.success("✅ Analysis completed successfully!")
+                    status_text.text("✅ Analysis complete!")
+                    time.sleep(1)
+                    progress_bar.empty()
+                    status_text.empty()
     
     with col2:
-        st.header("📊 Quick Stats")
-        if st.session_state.analysis_results:
+        # Quick stats
+        if st.session_state.analysis_complete and st.session_state.analysis_results:
             display_quick_stats(st.session_state.analysis_results)
-        else:
-            st.info("Upload an image and click 'Analyze' to see results")
     
-    # Display results if available
-    if st.session_state.analysis_results:
+    # Display detailed results
+    if st.session_state.analysis_complete and st.session_state.analysis_results:
         display_detailed_results(st.session_state.analysis_results)
-
-def analyze_image(uploaded_file):
-    """Analyze the uploaded image for authenticity"""
-    results = {
-        'metadata': {},
-        'editing_detection': {},
-        'ai_detection': {},
-        'file_info': {}
-    }
-    
-    try:
-        # File info
-        results['file_info'] = {
-            'filename': uploaded_file.name,
-            'size_mb': uploaded_file.size / (1024 * 1024),
-            'format': uploaded_file.type
-        }
-        
-        # Metadata analysis
-        results['metadata'] = extract_metadata(uploaded_file)
-        
-        # Editing detection
-        results['editing_detection'] = detect_editing(uploaded_file)
-        
-        # AI detection
-        if AI_DETECTION_AVAILABLE:
-            # Reset file pointer
-            uploaded_file.seek(0)
-            image = Image.open(uploaded_file)
-            results['ai_detection'] = detect_ai_generation_simple(image)
-        else:
-            # Fallback method
-            results['ai_detection'] = detect_ai_generation_fallback(uploaded_file)
-        
-    except Exception as e:
-        st.error(f"Error during analysis: {str(e)}")
-        return None
-    
-    return results
-
-def extract_metadata(uploaded_file):
-    """Extract EXIF metadata from image"""
-    metadata = {}
-    
-    try:
-        # Reset file pointer
-        uploaded_file.seek(0)
-        
-        # Read EXIF data
-        tags = exifread.process_file(uploaded_file)
-        
-        if tags:
-            # Camera information
-            if 'Image Make' in tags:
-                metadata['camera_make'] = str(tags['Image Make'])
-            if 'Image Model' in tags:
-                metadata['camera_model'] = str(tags['Image Model'])
-            
-            # Date and time
-            if 'EXIF DateTimeOriginal' in tags:
-                metadata['date_taken'] = str(tags['EXIF DateTimeOriginal'])
-            elif 'Image DateTime' in tags:
-                metadata['date_taken'] = str(tags['Image DateTime'])
-            
-            # GPS coordinates
-            if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
-                metadata['gps_latitude'] = str(tags['GPS GPSLatitude'])
-                metadata['gps_longitude'] = str(tags['GPS GPSLongitude'])
-            
-            # Software used
-            if 'Image Software' in tags:
-                metadata['software'] = str(tags['Image Software'])
-            
-            # Image dimensions
-            if 'EXIF ExifImageWidth' in tags:
-                metadata['width'] = str(tags['EXIF ExifImageWidth'])
-            if 'EXIF ExifImageLength' in tags:
-                metadata['height'] = str(tags['EXIF ExifImageLength'])
-            
-            metadata['has_exif'] = True
-        else:
-            metadata['has_exif'] = False
-            metadata['message'] = "No EXIF metadata found"
-            
-    except Exception as e:
-        metadata['error'] = f"Error reading metadata: {str(e)}"
-        metadata['has_exif'] = False
-    
-    return metadata
-
-def detect_editing(uploaded_file):
-    """Detect signs of image editing using basic analysis"""
-    editing_results = {}
-    
-    try:
-        # Reset file pointer
-        uploaded_file.seek(0)
-        
-        # Load image with PIL
-        image = Image.open(uploaded_file)
-        
-        # Convert to RGB if necessary
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        
-        # Save as JPEG for analysis
-        temp_path = tempfile.mktemp(suffix='.jpg')
-        image.save(temp_path, 'JPEG', quality=95)
-        
-        # Load with OpenCV for analysis
-        img = cv2.imread(temp_path)
-        
-        if img is not None:
-            # Basic editing detection using noise analysis
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-            # Apply Gaussian blur
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            
-            # Calculate difference
-            diff = cv2.absdiff(gray, blurred)
-            
-            # Calculate editing score (variance of differences)
-            score = np.var(diff)
-            
-            # Normalize for probability (0-100%)
-            probability = min(score / 1000 * 100, 100)
-            
-            editing_results['editing_score'] = score
-            editing_results['editing_probability'] = probability
-            editing_results['heatmap'] = diff
-            
-        else:
-            editing_results['editing_probability'] = 0.0
-            editing_results['error'] = "Could not load image for analysis"
-        
-        # Clean up temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
-    except Exception as e:
-        editing_results['error'] = f"Error in editing detection: {str(e)}"
-        editing_results['editing_probability'] = 0.0
-    
-    return editing_results
-
-def detect_ai_generation_fallback(uploaded_file):
-    """Fallback AI detection method"""
-    ai_results = {
-        'ai_probability': 0.0,
-        'model_used': 'Fallback (Statistical)',
-        'confidence': 0.0,
-        'detection_methods': [],
-        'details': {}
-    }
-    
-    # Placeholder: random probability for demonstration
-    # In a real implementation, this would use basic statistical analysis
-    ai_results['ai_probability'] = random.uniform(0, 30)  # Low probability for real images
-    ai_results['confidence'] = 0.3
-    ai_results['detection_methods'] = [{
-        'name': 'Statistical Analysis',
-        'probability': ai_results['ai_probability'],
-        'confidence': ai_results['confidence']
-    }]
-    
-    return ai_results
 
 def display_quick_stats(results):
     """Display quick statistics in the sidebar"""
-    if not results:
-        return
+    st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+    st.subheader("📊 Quick Stats")
     
-    # AI Detection Score
-    ai_prob = results.get('ai_detection', {}).get('ai_probability', 0)
-    st.metric("🤖 AI Probability", f"{ai_prob:.1f}%")
+    # Overall authenticity score
+    ai_prob = results['ai']['ai_probability']
+    editing_prob = results['editing']['probability']
     
-    # Editing Detection Score
-    editing_prob = results.get('editing_detection', {}).get('editing_probability', 0)
-    st.metric("✂️ Editing Probability", f"{editing_prob:.1f}%")
+    # Calculate overall score (weighted average)
+    overall_score = 100 - ((ai_prob * 0.6) + (editing_prob * 0.4))
     
-    # Metadata Status
-    has_exif = results.get('metadata', {}).get('has_exif', False)
-    metadata_status = "✅ Present" if has_exif else "❌ Absent"
-    st.metric("📸 Metadata", metadata_status)
+    # Determine status
+    if overall_score >= 80:
+        status = "🟢 Authentic"
+        status_class = "status-authentic"
+    elif overall_score >= 50:
+        status = "🟡 Suspicious"
+        status_class = "status-suspicious"
+    else:
+        status = "🔴 Likely Fake"
+        status_class = "status-fake"
     
-    # File Info
-    file_size = results.get('file_info', {}).get('size_mb', 0)
-    st.metric("📁 File Size", f"{file_size:.1f} MB")
+    st.markdown(f"""
+    <div class="metric-card {status_class}">
+        <h3>Overall Score</h3>
+        <h2>{overall_score:.1f}%</h2>
+        <p>{status}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # AI Generation Risk
+    st.markdown(f"""
+    <div class="metric-card">
+        <h4>AI Generation Risk</h4>
+        <h3>{ai_prob:.1f}%</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Editing Detection
+    st.markdown(f"""
+    <div class="metric-card">
+        <h4>Editing Detection</h4>
+        <h3>{editing_prob:.1f}%</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def display_detailed_results(results):
     """Display detailed analysis results in tabs"""
-    st.markdown("---")
-    st.header("📊 Analysis Results")
+    st.markdown("## 📋 Detailed Analysis Results")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Summary", "📸 Metadata", "🔍 Visual Analysis", "🤖 AI Analysis"])
+    # Create tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary", "📄 Metadata", "🔍 Visual Analysis", "🤖 AI Analysis"])
     
     with tab1:
         display_summary_tab(results)
     
     with tab2:
-        display_metadata_tab(results)
+        display_metadata_tab(results['metadata'])
     
     with tab3:
         display_visual_analysis_tab(results)
     
     with tab4:
-        display_ai_analysis_tab(results)
+        display_ai_analysis_tab(results['ai'])
     
     # Download report button
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        if st.button("📄 Download Report (PDF)", type="secondary", use_container_width=True):
-            generate_pdf_report(results)
+    if st.button("📄 Download PDF Report", type="secondary"):
+        pdf_bytes = generate_pdf_report(results)
+        st.download_button(
+            label="💾 Download Report",
+            data=pdf_bytes,
+            file_name=f"IRLCheck_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf"
+        )
 
 def display_summary_tab(results):
-    """Display summary of analysis results"""
+    """Display summary tab with overall results"""
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+    
+    # Overall assessment
+    ai_prob = results['ai']['ai_probability']
+    editing_prob = results['editing']['probability']
+    overall_score = 100 - ((ai_prob * 0.6) + (editing_prob * 0.4))
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        ai_prob = results.get('ai_detection', {}).get('ai_probability', 0)
-        status_class = "status-authentic" if ai_prob < 30 else "status-suspicious" if ai_prob < 70 else "status-fake"
-        st.markdown(f"""
-        <div class="metric-card {status_class}">
-            <h3>🤖 AI Generation</h3>
-            <h2>{ai_prob:.1f}%</h2>
-            <p>Probability of AI generation</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Overall Authenticity", f"{overall_score:.1f}%")
     
     with col2:
-        editing_prob = results.get('editing_detection', {}).get('editing_probability', 0)
-        status_class = "status-authentic" if editing_prob < 30 else "status-suspicious" if editing_prob < 70 else "status-fake"
-        st.markdown(f"""
-        <div class="metric-card {status_class}">
-            <h3>✂️ Image Editing</h3>
-            <h2>{editing_prob:.1f}%</h2>
-            <p>Probability of manipulation</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("AI Generation Risk", f"{ai_prob:.1f}%")
     
     with col3:
-        has_exif = results.get('metadata', {}).get('has_exif', False)
-        ai_prob = results.get('ai_detection', {}).get('ai_probability', 0)
-        editing_prob = results.get('editing_detection', {}).get('editing_probability', 0)
-        
-        if has_exif and ai_prob < 30 and editing_prob < 30:
-            status = "✅ Authentic"
-            status_class = "status-authentic"
-        elif ai_prob > 70 or editing_prob > 70:
-            status = "❌ Fake"
-            status_class = "status-fake"
-        else:
-            status = "⚠️ Suspicious"
-            status_class = "status-suspicious"
-            
-        st.markdown(f"""
-        <div class="metric-card {status_class}">
-            <h3>🔍 Overall Status</h3>
-            <h2>{status}</h2>
-            <p>Based on all indicators</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Editing Detection", f"{editing_prob:.1f}%")
     
     # Progress bars
-    st.subheader("📈 Detailed Scores")
+    st.subheader("Risk Assessment")
     
-    ai_prob = results.get('ai_detection', {}).get('ai_probability', 0)
-    editing_prob = results.get('editing_detection', {}).get('editing_probability', 0)
+    # AI Generation Risk
+    st.write("🤖 AI Generation Risk")
+    st.progress(ai_prob / 100)
+    st.caption(f"Confidence: {results['ai']['confidence']:.1%}")
     
-    col1, col2 = st.columns(2)
+    # Editing Detection
+    st.write("✂️ Editing Detection")
+    st.progress(editing_prob / 100)
+    st.caption(f"Confidence: {results['editing']['confidence']:.1%}")
     
-    with col1:
-        st.write("**AI Generation Risk**")
-        st.progress(ai_prob / 100)
-        st.write(f"{ai_prob:.1f}% - {'Low' if ai_prob < 30 else 'Medium' if ai_prob < 70 else 'High'} risk")
-    
-    with col2:
-        st.write("**Editing Detection**")
-        st.progress(editing_prob / 100)
-        st.write(f"{editing_prob:.1f}% - {'Low' if editing_prob < 30 else 'Medium' if editing_prob < 70 else 'High'} manipulation")
-    
-    # Detailed summary
-    st.subheader("📝 Analysis Summary")
-    
-    summary_text = f"""
-    **File Information:**
-    - Filename: {results.get('file_info', {}).get('filename', 'Unknown')}
-    - Size: {results.get('file_info', {}).get('size_mb', 0):.1f} MB
-    - Format: {results.get('file_info', {}).get('format', 'Unknown')}
-    
-    **Authenticity Assessment:**
-    - AI Generation Probability: {ai_prob:.1f}% ({'Low' if ai_prob < 30 else 'Medium' if ai_prob < 70 else 'High'} risk)
-    - Editing Detection: {editing_prob:.1f}% ({'Low' if editing_prob < 30 else 'Medium' if editing_prob < 70 else 'High'} manipulation)
-    - Metadata Status: {'Present and consistent' if has_exif else 'Absent or inconsistent'}
-    
-    **Recommendation:**
-    """
-    
-    if ai_prob < 30 and editing_prob < 30 and has_exif:
-        summary_text += "✅ This image appears to be authentic with low signs of manipulation."
-    elif ai_prob > 70 or editing_prob > 70:
-        summary_text += "⚠️ This image shows significant signs of AI generation or manipulation."
+    # Overall status
+    if overall_score >= 80:
+        st.success("✅ **VERDICT: Likely Authentic** - This image appears to be genuine with minimal signs of manipulation.")
+    elif overall_score >= 50:
+        st.warning("⚠️ **VERDICT: Suspicious** - This image shows some signs of potential manipulation. Further investigation recommended.")
     else:
-        summary_text += "🤔 This image shows some suspicious indicators. Further analysis recommended."
+        st.error("❌ **VERDICT: Likely Fake** - This image shows strong signs of AI generation or heavy editing.")
     
-    st.markdown(summary_text)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-def display_metadata_tab(results):
-    """Display detailed metadata information"""
-    metadata = results.get('metadata', {})
+def display_metadata_tab(metadata):
+    """Display metadata analysis results"""
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
     
-    if metadata.get('has_exif', False):
-        st.subheader("📸 EXIF Metadata")
-        
-        # Create metadata table
-        metadata_data = []
-        for key, value in metadata.items():
-            if key not in ['has_exif', 'error']:
-                # Format key names
-                formatted_key = key.replace('_', ' ').title()
-                metadata_data.append([formatted_key, str(value)])
-        
-        if metadata_data:
-            df = pd.DataFrame(metadata_data, columns=['Property', 'Value'])
-            st.dataframe(df, use_container_width=True)
-        
-        # GPS coordinates if available
-        if 'gps_latitude' in metadata and 'gps_longitude' in metadata:
-            st.subheader("📍 GPS Coordinates")
-            st.write(f"Latitude: {metadata['gps_latitude']}")
-            st.write(f"Longitude: {metadata['gps_longitude']}")
-            
-            # Create a simple map (placeholder)
-            st.info("Map visualization will be implemented in future versions")
+    if not metadata:
+        st.info("No metadata found or metadata analysis disabled.")
+        return
     
-    else:
-        st.warning("⚠️ No EXIF metadata found in this image")
-        st.info("This could indicate:")
-        st.markdown("""
-        - The image was edited and metadata was stripped
-        - The image was generated by AI
-        - The image format doesn't support EXIF data
-        - The image was saved without preserving metadata
-        """)
+    st.subheader("📄 EXIF Metadata Analysis")
+    
+    # Basic file info
+    if 'File Information' in metadata:
+        st.write("**File Information:**")
+        for key, value in metadata['File Information'].items():
+            st.write(f"• {key}: {value}")
+    
+    # Camera info
+    if 'Camera Information' in metadata:
+        st.write("**Camera Information:**")
+        for key, value in metadata['Camera Information'].items():
+            st.write(f"• {key}: {value}")
+    
+    # GPS info
+    if 'GPS Information' in metadata:
+        st.write("**GPS Information:**")
+        for key, value in metadata['GPS Information'].items():
+            st.write(f"• {key}: {value}")
+    
+    # Software info
+    if 'Software Information' in metadata:
+        st.write("**Software Information:**")
+        for key, value in metadata['Software Information'].items():
+            st.write(f"• {key}: {value}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def display_visual_analysis_tab(results):
     """Display visual analysis results"""
-    st.subheader("🔍 Visual Analysis")
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
     
-    editing_results = results.get('editing_detection', {})
+    st.subheader("🔍 Visual Analysis Results")
     
-    if 'heatmap' in editing_results and editing_results['heatmap'] is not None:
-        st.write("**Noise Analysis Heatmap:**")
-        st.write("This visualization shows areas where the image may have been edited or compressed.")
-        
-        # Convert heatmap to displayable format
-        heatmap = editing_results['heatmap']
-        heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX)
-        heatmap_colored = cv2.applyColorMap(heatmap_normalized.astype(np.uint8), cv2.COLORMAP_JET)
-        
-        # Convert BGR to RGB for display
-        heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-        
-        st.image(heatmap_rgb, caption="Noise Analysis Heatmap - Red areas indicate potential editing", use_container_width=True)
-        
-        # Score explanation
-        editing_score = editing_results.get('editing_score', 0)
-        st.write(f"**Editing Score:** {editing_score:.2f}")
-        st.info("""
-        **How to interpret the heatmap:**
-        - 🔴 **Red areas**: High noise levels, potential editing
-        - 🟡 **Yellow areas**: Medium noise levels
-        - 🟢 **Green areas**: Low noise levels, likely original
-        """)
+    # Editing detection details
+    editing_result = results['editing']
+    st.write("**Editing Detection Analysis:**")
+    st.write(f"• Probability of editing: {editing_result['probability']:.1f}%")
+    st.write(f"• Confidence: {editing_result['confidence']:.1%}")
     
-    else:
-        st.warning("Visual analysis could not be performed")
-        if 'error' in editing_results:
-            st.error(f"Error: {editing_results['error']}")
+    if 'details' in editing_result:
+        st.write("**Technical Details:**")
+        for key, value in editing_result['details'].items():
+            st.write(f"• {key}: {value}")
+    
+    # Create visualization
+    fig = go.Figure()
+    
+    # Add bars for different metrics
+    fig.add_trace(go.Bar(
+        x=['AI Generation Risk', 'Editing Detection'],
+        y=[results['ai']['ai_probability'], editing_result['probability']],
+        marker_color=['#FF6B6B', '#4ECDC4'],
+        text=[f"{results['ai']['ai_probability']:.1f}%", f"{editing_result['probability']:.1f}%"],
+        textposition='auto'
+    ))
+    
+    fig.update_layout(
+        title="Risk Assessment Visualization",
+        xaxis_title="Analysis Type",
+        yaxis_title="Risk Percentage (%)",
+        yaxis_range=[0, 100],
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-def display_ai_analysis_tab(results):
+def display_ai_analysis_tab(ai_results):
     """Display AI analysis results"""
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+    
     st.subheader("🤖 AI Generation Analysis")
     
-    ai_results = results.get('ai_detection', {})
-    
     # Overall AI probability
-    ai_prob = ai_results.get('ai_probability', 0)
-    confidence = ai_results.get('confidence', 0)
-    model_used = ai_results.get('model_used', 'Unknown')
+    st.metric("AI Generation Probability", f"{ai_results['ai_probability']:.1f}%")
+    st.metric("Confidence", f"{ai_results['confidence']:.1%}")
+    st.metric("Model Used", ai_results['model_used'])
     
-    col1, col2 = st.columns(2)
+    # Risk level
+    ai_prob = ai_results['ai_probability']
+    if ai_prob < 30:
+        risk_level = "🟢 Low Risk"
+        risk_color = "#28a745"
+    elif ai_prob < 70:
+        risk_level = "🟡 Medium Risk"
+        risk_color = "#ffc107"
+    else:
+        risk_level = "🔴 High Risk"
+        risk_color = "#dc3545"
     
-    with col1:
-        st.metric("**Overall AI Probability**", f"{ai_prob:.1f}%")
-        st.metric("**Confidence**", f"{confidence:.2f}")
-    
-    with col2:
-        st.metric("**Model Used**", model_used)
-        st.metric("**Risk Level**", "High" if ai_prob > 70 else "Medium" if ai_prob > 30 else "Low")
+    st.markdown(f"""
+    <div style="background-color: {risk_color}; color: white; padding: 1rem; border-radius: 10px; text-align: center;">
+        <h4>Risk Level: {risk_level}</h4>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Detection methods
-    detection_methods = ai_results.get('detection_methods', [])
-    
-    if detection_methods:
-        st.subheader("🔬 Detection Methods Used")
-        
-        for method in detection_methods:
-            with st.container():
-                st.markdown(f"""
-                <div class="ai-method-card">
-                    <h4>{method['name']}</h4>
-                    <p><strong>Probability:</strong> {method['probability']:.1f}%</p>
-                    <p><strong>Confidence:</strong> {method['confidence']:.2f}</p>
-                </div>
-                """, unsafe_allow_html=True)
+    if ai_results['detection_methods']:
+        st.subheader("Detection Methods Used:")
+        for method in ai_results['detection_methods']:
+            st.markdown(f"""
+            <div class="ai-method-card">
+                <strong>{method['name']}</strong><br>
+                Probability: {method['probability']:.1f}%<br>
+                Confidence: {method['confidence']:.1%}
+            </div>
+            """, unsafe_allow_html=True)
     
     # Technical details
-    details = ai_results.get('details', {})
-    if details:
-        st.subheader("⚙️ Technical Details")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.write(f"**Methods Used:** {details.get('methods_used', 0)}")
-        with col2:
-            st.write(f"**Device:** {details.get('device', 'Unknown')}")
-        with col3:
-            st.write(f"**Models Available:** {details.get('models_available', 0)}")
+    if 'details' in ai_results:
+        st.subheader("Technical Details:")
+        details = ai_results['details']
+        st.write(f"• Methods used: {details.get('methods_used', 'N/A')}")
+        st.write(f"• Device: {details.get('device', 'N/A')}")
+        st.write(f"• Models available: {details.get('models_available', 'N/A')}")
     
-    # AI detection explanation
-    st.subheader("📚 How AI Detection Works")
-    
+    # Explanation
+    st.subheader("How AI Detection Works:")
     st.markdown("""
-    **IRLCheck uses multiple methods to detect AI-generated images:**
+    Our AI detection system uses multiple methods:
     
-    1. **Statistical Analysis**: Analyzes frequency patterns, texture, noise, and edge characteristics
-    2. **Deep Learning Models**: Uses pre-trained neural networks to identify AI patterns
-    3. **CLIP Analysis**: Compares image features with text descriptions of real vs AI images
+    1. **Statistical Analysis** - Analyzes frequency patterns, texture, and noise characteristics
+    2. **Deep Learning** - Uses pre-trained neural networks to identify AI-generated patterns
+    3. **CLIP Analysis** - Compares image features with text descriptions of real vs AI images
     
-    **Common AI Generation Tools Detected:**
-    - Stable Diffusion
-    - DALL-E
-    - Midjourney
-    - GAN-generated images
-    
-    **Note**: AI detection is not 100% accurate. Results should be used as indicators, not definitive proof.
+    The final probability is a weighted combination of these methods.
     """)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-def generate_pdf_report(results):
-    """Generate and download PDF report"""
+def extract_metadata(image_bytes):
+    """Extract metadata from image with caching"""
     try:
-        # Create PDF buffer
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
-        elements = []
+        # Convert bytes to file-like object
+        image_file = io.BytesIO(image_bytes)
         
-        # Add title
-        styles = getSampleStyleSheet()
-        title = Paragraph("IRLCheck - Image Authenticity Report", styles['Title'])
-        elements.append(title)
-        elements.append(Spacer(1, 20))
+        # Extract EXIF data
+        tags = exifread.process_file(image_file)
         
-        # Add file information
-        file_info = results.get('file_info', {})
-        elements.append(Paragraph(f"<b>File:</b> {file_info.get('filename', 'Unknown')}", styles['Normal']))
-        elements.append(Paragraph(f"<b>Size:</b> {file_info.get('size_mb', 0):.1f} MB", styles['Normal']))
-        elements.append(Paragraph(f"<b>Format:</b> {file_info.get('format', 'Unknown')}", styles['Normal']))
-        elements.append(Spacer(1, 20))
+        if not tags:
+            return {"File Information": {"Status": "No EXIF data found"}}
         
-        # Add analysis results
-        ai_prob = results.get('ai_detection', {}).get('ai_probability', 0)
-        editing_prob = results.get('editing_detection', {}).get('editing_probability', 0)
+        # Organize metadata
+        metadata = {
+            "File Information": {},
+            "Camera Information": {},
+            "GPS Information": {},
+            "Software Information": {}
+        }
         
-        elements.append(Paragraph("<b>Analysis Results:</b>", styles['Heading2']))
-        elements.append(Paragraph(f"AI Generation Probability: {ai_prob:.1f}%", styles['Normal']))
-        elements.append(Paragraph(f"Editing Detection: {editing_prob:.1f}%", styles['Normal']))
-        elements.append(Spacer(1, 20))
+        for tag, value in tags.items():
+            if tag.startswith('Image'):
+                metadata["File Information"][tag] = str(value)
+            elif tag.startswith('EXIF'):
+                metadata["Camera Information"][tag] = str(value)
+            elif tag.startswith('GPS'):
+                metadata["GPS Information"][tag] = str(value)
+            elif tag.startswith('Software') or tag.startswith('Processing'):
+                metadata["Software Information"][tag] = str(value)
         
-        # Build PDF
-        doc.build(elements)
-        
-        # Get PDF content
-        pdf_content = buffer.getvalue()
-        buffer.close()
-        
-        # Create download button
-        st.download_button(
-            label="📄 Download PDF Report",
-            data=pdf_content,
-            file_name="irlcheck_report.pdf",
-            mime="application/pdf"
-        )
+        return metadata
         
     except Exception as e:
-        st.error(f"Error generating PDF report: {str(e)}")
+        return {"Error": f"Failed to extract metadata: {str(e)}"}
+
+def detect_editing(image):
+    """Detect editing traces in image"""
+    try:
+        # Convert PIL image to numpy array
+        img_array = np.array(image)
+        
+        # Convert to grayscale if needed
+        if len(img_array.shape) == 3:
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_array
+        
+        # Basic noise analysis (simplified version)
+        # Apply Gaussian blur
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Calculate difference
+        diff = cv2.absdiff(gray, blurred)
+        
+        # Calculate variance of the difference
+        variance = np.var(diff)
+        
+        # Normalize variance to get a probability
+        # Higher variance might indicate editing
+        probability = min(variance / 1000 * 100, 100)
+        confidence = 0.6  # Medium confidence for this method
+        
+        return {
+            'probability': probability,
+            'confidence': confidence,
+            'details': {
+                'noise_variance': variance,
+                'method': 'Noise Analysis'
+            }
+        }
+        
+    except Exception as e:
+        return {
+            'probability': 50.0,
+            'confidence': 0.3,
+            'details': {'error': str(e)}
+        }
+
+def generate_pdf_report(results):
+    """Generate a comprehensive PDF report"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=1
+    )
+    story.append(Paragraph("IRLCheck-Clickdoo Analysis Report", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Summary
+    story.append(Paragraph("Executive Summary", styles['Heading2']))
+    ai_prob = results['ai']['ai_probability']
+    editing_prob = results['editing']['probability']
+    overall_score = 100 - ((ai_prob * 0.6) + (editing_prob * 0.4))
+    
+    summary_text = f"""
+    Overall Authenticity Score: {overall_score:.1f}%
+    AI Generation Risk: {ai_prob:.1f}%
+    Editing Detection: {editing_prob:.1f}%
+    Analysis Date: {results['timestamp']}
+    Filename: {results['filename']}
+    """
+    story.append(Paragraph(summary_text, styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Detailed results
+    story.append(Paragraph("Detailed Analysis", styles['Heading2']))
+    
+    # AI Analysis
+    story.append(Paragraph("AI Generation Analysis", styles['Heading3']))
+    ai_text = f"""
+    Probability: {ai_prob:.1f}%
+    Confidence: {results['ai']['confidence']:.1%}
+    Model Used: {results['ai']['model_used']}
+    """
+    story.append(Paragraph(ai_text, styles['Normal']))
+    story.append(Spacer(1, 12))
+    
+    # Editing Analysis
+    story.append(Paragraph("Editing Detection", styles['Heading3']))
+    editing_text = f"""
+    Probability: {editing_prob:.1f}%
+    Confidence: {results['editing']['confidence']:.1%}
+    """
+    story.append(Paragraph(editing_text, styles['Normal']))
+    story.append(Spacer(1, 12))
+    
+    # Metadata
+    if results['metadata']:
+        story.append(Paragraph("Metadata Analysis", styles['Heading3']))
+        for category, data in results['metadata'].items():
+            if isinstance(data, dict):
+                story.append(Paragraph(f"{category}:", styles['Heading4']))
+                for key, value in data.items():
+                    story.append(Paragraph(f"• {key}: {value}", styles['Normal']))
+                story.append(Spacer(1, 6))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 if __name__ == "__main__":
     main() 
