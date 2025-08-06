@@ -868,64 +868,122 @@ def display_visual_analysis_tab(results):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def display_ai_analysis_tab(ai_results):
-    """Display AI analysis results"""
+    """Display AI analysis results with detailed reasoning"""
     st.markdown('<div class="result-card">', unsafe_allow_html=True)
     
     st.subheader("🤖 AI Generation Analysis")
     
     # Overall AI probability
-    st.metric("AI Generation Probability", f"{ai_results['ai_probability']:.1f}%")
-    st.metric("Confidence", f"{ai_results['confidence']:.1%}")
-    st.metric("Model Used", ai_results['model_used'])
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("AI Generation Probability", f"{ai_results['ai_probability']:.1f}%")
+    with col2:
+        st.metric("Confidence", f"{ai_results['confidence']:.1%}")
+    with col3:
+        st.metric("Model Used", ai_results['model_used'])
     
     # Risk level
     ai_prob = ai_results['ai_probability']
     if ai_prob < 30:
         risk_level = "🟢 Low Risk"
         risk_color = "#28a745"
+        risk_description = "This image shows minimal signs of AI generation"
     elif ai_prob < 70:
         risk_level = "🟡 Medium Risk"
         risk_color = "#ffc107"
+        risk_description = "This image shows some signs of potential AI generation"
     else:
         risk_level = "🔴 High Risk"
         risk_color = "#dc3545"
+        risk_description = "This image shows strong signs of AI generation"
     
     st.markdown(f"""
-    <div style="background-color: {risk_color}; color: white; padding: 1rem; border-radius: 10px; text-align: center;">
+    <div style="background-color: {risk_color}; color: white; padding: 1rem; border-radius: 10px; text-align: center; margin: 1rem 0;">
         <h4>Risk Level: {risk_level}</h4>
+        <p>{risk_description}</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Detection methods
+    # Detailed reasoning section
+    if 'details' in ai_results and 'detailed_reasons' in ai_results['details']:
+        st.subheader("📋 Detailed Analysis Report")
+        st.markdown("**Why this image was classified as AI-generated or not:**")
+        
+        reasons = ai_results['details']['detailed_reasons']
+        if reasons:
+            for reason in reasons:
+                st.markdown(f"<div style='background: #f8f9fa; padding: 0.5rem; margin: 0.5rem 0; border-radius: 5px; border-left: 3px solid #007bff;'>{reason}</div>", unsafe_allow_html=True)
+        else:
+            st.info("No detailed reasoning available for this analysis.")
+    
+    # Detection methods with individual scores
     if ai_results['detection_methods']:
-        st.subheader("Detection Methods Used:")
+        st.subheader("🔬 Individual Method Results:")
+        
+        # Create a DataFrame for better display
+        methods_data = []
         for method in ai_results['detection_methods']:
-            st.markdown(f"""
-            <div class="ai-method-card">
-                <strong>{method['name']}</strong><br>
-                Probability: {method['probability']:.1f}%<br>
-                Confidence: {method['confidence']:.1%}
-            </div>
-            """, unsafe_allow_html=True)
+            methods_data.append({
+                'Method': method['name'],
+                'Probability': f"{method['probability']:.1f}%",
+                'Confidence': f"{method['confidence']:.1%}",
+                'Status': "🟢 Low" if method['probability'] < 30 else "🟡 Medium" if method['probability'] < 70 else "🔴 High"
+            })
+        
+        df = pd.DataFrame(methods_data)
+        st.dataframe(df, use_container_width=True)
+        
+        # Method details
+        if 'details' in ai_results and 'method_scores' in ai_results['details']:
+            with st.expander("🔍 Detailed Method Analysis", expanded=False):
+                method_scores = ai_results['details']['method_scores']
+                for method_name, method_data in method_scores.items():
+                    st.write(f"**{method_name.replace('_', ' ').title()}**")
+                    if 'details' in method_data:
+                        details = method_data['details']
+                        if 'reasoning' in details:
+                            st.write(f"*{details['reasoning']}*")
+                        
+                        # Show technical metrics
+                        tech_metrics = {k: v for k, v in details.items() if k not in ['reasoning', 'error']}
+                        if tech_metrics:
+                            for metric, value in tech_metrics.items():
+                                if isinstance(value, (int, float)):
+                                    st.write(f"• {metric.replace('_', ' ').title()}: {value:.3f}")
+                                else:
+                                    st.write(f"• {metric.replace('_', ' ').title()}: {value}")
+                    st.divider()
     
     # Technical details
     if 'details' in ai_results:
-        st.subheader("Technical Details:")
+        st.subheader("⚙️ Technical Information:")
         details = ai_results['details']
-        st.write(f"• Methods used: {details.get('methods_used', 'N/A')}")
-        st.write(f"• Device: {details.get('device', 'N/A')}")
-        st.write(f"• Models available: {details.get('models_available', 'N/A')}")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"• **Methods Used:** {details.get('methods_used', 'N/A')}")
+            st.write(f"• **Device:** {details.get('device', 'N/A')}")
+        with col2:
+            st.write(f"• **Models Available:** {details.get('models_available', 'N/A')}")
+            st.write(f"• **Analysis Time:** {datetime.now().strftime('%H:%M:%S')}")
     
-    # Explanation
-    st.subheader("How AI Detection Works:")
+    # How it works explanation
+    st.subheader("📚 How AI Detection Works:")
     st.markdown("""
-    Our AI detection system uses multiple methods:
+    Our advanced AI detection system uses **10 different analysis methods**:
     
-    1. **Statistical Analysis** - Analyzes frequency patterns, texture, and noise characteristics
-    2. **Deep Learning** - Uses pre-trained neural networks to identify AI-generated patterns
-    3. **CLIP Analysis** - Compares image features with text descriptions of real vs AI images
+    1. **Deep Learning** (25% weight) - Neural networks trained to identify AI patterns
+    2. **CLIP Analysis** (20% weight) - Compares image with text descriptions
+    3. **Statistical Analysis** (15% weight) - Analyzes pixel distribution patterns
+    4. **Texture Analysis** (12% weight) - Examines surface texture characteristics
+    5. **Frequency Domain** (10% weight) - Analyzes frequency patterns in the image
+    6. **Noise Analysis** (8% weight) - Studies noise patterns and characteristics
+    7. **Edge Analysis** (5% weight) - Examines edge patterns and consistency
+    8. **Color Analysis** (3% weight) - Analyzes color distribution and uniformity
+    9. **Artifact Detection** (1% weight) - Looks for AI generation artifacts
+    10. **Consistency Analysis** (1% weight) - Checks overall image consistency
     
-    The final probability is a weighted combination of these methods.
+    **Each method provides specific reasoning** for why it thinks the image is AI-generated or not.
+    The final probability is a **weighted combination** of all methods.
     """)
     
     st.markdown('</div>', unsafe_allow_html=True)
