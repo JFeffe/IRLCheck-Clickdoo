@@ -94,7 +94,8 @@ class AIDetector:
                 'artifacts': self._enhanced_artifact_detection(img_array),
                 'consistency': self._enhanced_consistency_analysis(img_array),
                 'ela': self._error_level_analysis(img_array),
-                'compression': self._compression_analysis(img_array)
+                'compression': self._compression_analysis(img_array),
+                'metadata': self._metadata_analysis(image)
             }
             
             # Calculate weighted final score with improved weighting
@@ -700,8 +701,37 @@ class AIDetector:
         except Exception as e:
             return {'probability': 50, 'confidence': 0.3, 'details': {'error': str(e)}}
 
+    def _metadata_analysis(self, image):
+        """Analyze metadata presence as AI indicator"""
+        try:
+            # Check if image has metadata
+            metadata = image.info if hasattr(image, 'info') else {}
+            
+            # AI-generated images often lack metadata
+            has_metadata = bool(metadata)
+            
+            # Calculate probability based on metadata presence
+            if not has_metadata:
+                probability = 75.0  # High probability for AI if no metadata
+                reasoning = "No metadata found - this is highly suspicious for AI-generated images"
+            else:
+                probability = 25.0  # Lower probability if metadata exists
+                reasoning = "Metadata found - this suggests a real camera or editing software"
+            
+            return {
+                'probability': probability,
+                'confidence': 0.8,
+                'details': {
+                    'has_metadata': has_metadata,
+                    'metadata_keys': list(metadata.keys()) if metadata else [],
+                    'reasoning': reasoning
+                }
+            }
+        except Exception as e:
+            return {'probability': 50, 'confidence': 0.3, 'details': {'error': str(e)}}
+
     def _combine_results_enhanced(self, results):
-        """Enhanced combination of all analysis results"""
+        """Enhanced combination of all analysis results with aggressive AI detection"""
         # Improved weighting based on reliability and sensitivity
         weights = {
             'deep_learning': 0.30,  # Increased weight
@@ -715,12 +745,16 @@ class AIDetector:
             'artifacts': 0.01,
             'consistency': 0.005,
             'ela': 0.005,
-            'compression': 0.005
+            'compression': 0.005,
+            'metadata': 0.01 # Added metadata weight
         }
         
         total_probability = 0
         total_weight = 0
         detailed_reasons = []
+        
+        # AGGRESSIVE AI DETECTION: Check for specific AI indicators
+        aggressive_boost = 0
         
         for method, weight in weights.items():
             if method in results:
@@ -733,6 +767,10 @@ class AIDetector:
                 total_probability += prob * adjusted_weight
                 total_weight += adjusted_weight
                 
+                # AGGRESSIVE BOOST: If any method detects high AI probability, boost overall
+                if prob > 40:  # Lower threshold for aggressive detection
+                    aggressive_boost += (prob - 40) * 0.1  # Boost for each method above 40%
+                
                 # Add detailed reasoning
                 if 'reasoning' in result['details']:
                     detailed_reasons.append(f"• {method.replace('_', ' ').title()}: {result['details']['reasoning']}")
@@ -742,9 +780,12 @@ class AIDetector:
         else:
             final_probability = 50
         
-        # Apply final correction for better sensitivity
-        if final_probability > 50:
-            final_probability = 50 + (final_probability - 50) * 1.2
+        # Apply aggressive correction for better sensitivity
+        if final_probability > 30:  # Much lower threshold
+            final_probability = 30 + (final_probability - 30) * 1.8  # More aggressive amplification
+        
+        # Add aggressive boost
+        final_probability += aggressive_boost
         
         final_probability = min(final_probability, 100)
         
@@ -755,7 +796,7 @@ class AIDetector:
         report = {
             'ai_probability': final_probability,
             'confidence': avg_confidence,
-            'model_used': 'Enhanced Multi-method AI Detection',
+            'model_used': 'Enhanced Multi-method AI Detection (Aggressive Mode)',
             'detection_methods': [
                 {
                     'name': method.replace('_', ' ').title(),
@@ -768,6 +809,7 @@ class AIDetector:
                 'methods_used': len(results),
                 'device': str(self.device),
                 'models_available': len(self.models),
+                'aggressive_boost': aggressive_boost,
                 'detailed_reasons': detailed_reasons,
                 'method_scores': {
                     method: {

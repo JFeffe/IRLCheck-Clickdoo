@@ -969,7 +969,7 @@ def display_ai_analysis_tab(ai_results):
         # How it works explanation
     st.subheader("📚 How Enhanced AI Detection Works:")
     st.markdown("""
-    Our **enhanced AI detection system** uses **12 different analysis methods** with improved sensitivity:
+    Our **enhanced AI detection system** uses **13 different analysis methods** with **AGGRESSIVE sensitivity**:
     
     1. **Deep Learning** (30% weight) - Enhanced neural networks with better AI pattern recognition
     2. **CLIP Analysis** (25% weight) - Improved text-image comparison with more specific prompts
@@ -983,15 +983,17 @@ def display_ai_analysis_tab(ai_results):
     10. **Consistency Analysis** (0.5% weight) - Improved lighting/perspective consistency
     11. **Error Level Analysis** (0.5% weight) - Compression artifact detection
     12. **Compression Analysis** (0.5% weight) - Block artifact detection
+    13. **Metadata Analysis** (1% weight) - **NEW**: Checks for missing metadata (AI indicator)
     
-    **Key Improvements:**
-    • **Sensitivity Correction**: High probabilities are amplified for better detection
-    • **Lower Thresholds**: More sensitive detection of AI patterns
-    • **Enhanced Algorithms**: Improved mathematical models for each method
-    • **Better Weighting**: Increased weights for most reliable methods
+    **AGGRESSIVE MODE Improvements:**
+    • **Lower Threshold**: Amplification starts at 30% (instead of 50%)
+    • **Higher Amplification**: 1.8x boost (instead of 1.2x)
+    • **Aggressive Boost**: Additional boost for each method above 40%
+    • **Metadata Check**: High suspicion (75%) when no metadata found
+    • **Enhanced Sensitivity**: Much more sensitive to AI patterns
     
     **Each method provides specific reasoning** for why it thinks the image is AI-generated or not.
-    The final probability is a **weighted combination** with sensitivity correction applied.
+    The final probability is a **weighted combination** with aggressive sensitivity correction applied.
     """)
     
     st.markdown('</div>', unsafe_allow_html=True)
