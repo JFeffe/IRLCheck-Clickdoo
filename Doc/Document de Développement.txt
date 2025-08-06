@@ -1,0 +1,173 @@
+Document de Développement – App de Détection d’Authenticité d’Images
+1. Objectif du projet
+Créer une application web permettant :
+
+D’analyser une image pour détecter :
+
+Métadonnées (EXIF, GPS, appareil photo, date, logiciel utilisé…)
+
+Modifications (photoshop, retouche, absence de métadonnées cohérentes…)
+
+Origine IA (image générée ou altérée par IA)
+
+D’offrir une interface simple en drag-and-drop
+
+Compatible .png et .jpg (et éventuellement .jpeg, .webp)
+
+Déploiement sur Streamlit + hébergement sur GitHub Pages / Streamlit Cloud
+
+2. Fonctionnalités principales
+2.1. Importation
+Zone de Drag & Drop (ou bouton “Choisir un fichier”)
+
+Formats acceptés : .jpg, .jpeg, .png, .webp
+
+Taille max configurable (ex : 10 Mo)
+
+2.2. Analyse des métadonnées
+Extraction EXIF :
+
+Marque / modèle de l’appareil photo
+
+Date/heure de capture
+
+Coordonnées GPS (si présentes)
+
+Logiciel utilisé pour sauvegarder l’image
+
+Indication si les métadonnées sont absentes ou incohérentes
+
+2.3. Détection de retouche
+Analyse du bruit de l’image (erreurs de compression)
+
+Vérification des zones retouchées (ELA – Error Level Analysis)
+
+Recherche d’indices de recompression (changement d’entropie JPEG)
+
+2.4. Détection IA
+Modèle d’IA pré-entraîné pour reconnaître :
+
+Images générées par IA (Stable Diffusion, Midjourney, DALL·E…)
+
+Images partiellement modifiées par IA (inpainting)
+
+Score de probabilité IA (%)
+
+Message clair : “Probable image IA” / “Probable image réelle”
+
+2.5. Résultats et rapport
+Affichage en 3 onglets :
+
+Résumé → Probabilité IA, métadonnées clés, statut “Retouchée ou non”
+
+Métadonnées complètes (tableau détaillé)
+
+Analyse visuelle (ex : carte thermique ELA)
+
+Bouton Télécharger rapport PDF avec :
+
+Image originale
+
+Métadonnées
+
+Score IA
+
+Observations
+
+3. Interface utilisateur (UI/UX)
+markdown
+Copier
+Modifier
+-----------------------------------------------------
+|   [Logo] AI Image Inspector                        |
+-----------------------------------------------------
+|  Drag & Drop your image here OR [Browse]           |
+|  (Accepted: JPG, JPEG, PNG, WEBP | Max 10 MB)      |
+-----------------------------------------------------
+| [Analyse]                                          |
+-----------------------------------------------------
+|  Results:                                          |
+|  [Tab 1: Summary] | [Tab 2: Metadata] | [Tab 3: ELA]|
+-----------------------------------------------------
+|  [Download Report]                                 |
+-----------------------------------------------------
+| Footer: "Powered by Streamlit | Open Source on GitHub"
+-----------------------------------------------------
+4. Stack technique
+Frontend & Backend : Streamlit
+
+Analyse EXIF : exifread ou Pillow
+
+ELA & Analyse de compression : OpenCV + scikit-image
+
+Détection IA :
+
+Utiliser un modèle open-source (ex : AI-Or-Not, HuggingFace) ou fine-tuner un ResNet/Vision Transformer
+
+Génération du rapport PDF : reportlab ou fpdf
+
+Hébergement :
+
+Streamlit Cloud pour l’app
+
+GitHub pour le code source
+
+Option : Docker pour portabilité
+
+5. Étapes de développement
+Phase 1 – Setup du projet
+Créer un repo GitHub
+
+Installer Streamlit et dépendances :
+
+bash
+Copier
+Modifier
+pip install streamlit exifread opencv-python scikit-image pillow reportlab
+Créer un fichier app.py Streamlit
+
+Phase 2 – Importation d’image
+Implémenter un widget drag-and-drop
+
+Sauvegarder l’image uploadée temporairement
+
+Phase 3 – Extraction de métadonnées
+Lecture EXIF via exifread
+
+Affichage clair + avertissement si absent/incohérent
+
+Phase 4 – Analyse de retouche
+Implémenter ELA avec OpenCV
+
+Générer une carte thermique (Image overlay)
+
+Phase 5 – Détection IA
+Charger un modèle pré-entraîné HuggingFace
+
+Calculer et afficher un score (%)
+
+Phase 6 – Interface résultats
+Résumé (probabilité IA, statut)
+
+Métadonnées détaillées
+
+Carte thermique de retouche
+
+Phase 7 – Génération rapport PDF
+Inclure image, résultats, tableau EXIF
+
+Bouton de téléchargement
+
+Phase 8 – Déploiement
+Pousser le code sur GitHub
+
+Déployer sur Streamlit Cloud
+
+6. Options supplémentaires (version avancée)
+Analyse multiple d’images en batch
+
+Historique des analyses côté utilisateur
+
+API REST pour intégration avec d’autres apps
+
+Support vidéo (extraction d’images clés et analyse)

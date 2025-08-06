@@ -1,0 +1,13 @@
+# System packages required for IRLCheck-Clickdoo
+# These will be installed by Streamlit Cloud
+
+# Image processing libraries
+libgl1-mesa-glx
+libglib2.0-0
+
+# Additional system dependencies
+ffmpeg
+libsm6
+libxext6
+libxrender-dev
+libgomp1 
