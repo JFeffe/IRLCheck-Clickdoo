@@ -966,24 +966,32 @@ def display_ai_analysis_tab(ai_results):
             st.write(f"• **Models Available:** {details.get('models_available', 'N/A')}")
             st.write(f"• **Analysis Time:** {datetime.now().strftime('%H:%M:%S')}")
     
-    # How it works explanation
-    st.subheader("📚 How AI Detection Works:")
+        # How it works explanation
+    st.subheader("📚 How Enhanced AI Detection Works:")
     st.markdown("""
-    Our advanced AI detection system uses **10 different analysis methods**:
+    Our **enhanced AI detection system** uses **12 different analysis methods** with improved sensitivity:
     
-    1. **Deep Learning** (25% weight) - Neural networks trained to identify AI patterns
-    2. **CLIP Analysis** (20% weight) - Compares image with text descriptions
-    3. **Statistical Analysis** (15% weight) - Analyzes pixel distribution patterns
-    4. **Texture Analysis** (12% weight) - Examines surface texture characteristics
-    5. **Frequency Domain** (10% weight) - Analyzes frequency patterns in the image
-    6. **Noise Analysis** (8% weight) - Studies noise patterns and characteristics
-    7. **Edge Analysis** (5% weight) - Examines edge patterns and consistency
-    8. **Color Analysis** (3% weight) - Analyzes color distribution and uniformity
-    9. **Artifact Detection** (1% weight) - Looks for AI generation artifacts
-    10. **Consistency Analysis** (1% weight) - Checks overall image consistency
+    1. **Deep Learning** (30% weight) - Enhanced neural networks with better AI pattern recognition
+    2. **CLIP Analysis** (25% weight) - Improved text-image comparison with more specific prompts
+    3. **Statistical Analysis** (15% weight) - Enhanced pixel distribution analysis with sensitivity correction
+    4. **Texture Analysis** (12% weight) - Improved texture pattern detection
+    5. **Frequency Domain** (8% weight) - Enhanced frequency pattern analysis
+    6. **Noise Analysis** (5% weight) - Multiple noise detection methods
+    7. **Edge Analysis** (2% weight) - Enhanced edge pattern analysis
+    8. **Color Analysis** (1% weight) - Improved color uniformity detection
+    9. **Artifact Detection** (1% weight) - Enhanced AI generation artifact detection
+    10. **Consistency Analysis** (0.5% weight) - Improved lighting/perspective consistency
+    11. **Error Level Analysis** (0.5% weight) - Compression artifact detection
+    12. **Compression Analysis** (0.5% weight) - Block artifact detection
+    
+    **Key Improvements:**
+    • **Sensitivity Correction**: High probabilities are amplified for better detection
+    • **Lower Thresholds**: More sensitive detection of AI patterns
+    • **Enhanced Algorithms**: Improved mathematical models for each method
+    • **Better Weighting**: Increased weights for most reliable methods
     
     **Each method provides specific reasoning** for why it thinks the image is AI-generated or not.
-    The final probability is a **weighted combination** of all methods.
+    The final probability is a **weighted combination** with sensitivity correction applied.
     """)
     
     st.markdown('</div>', unsafe_allow_html=True)
