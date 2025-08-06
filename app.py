@@ -156,6 +156,8 @@ def initialize_session_state():
         st.session_state.uploaded_file = None
     if 'analysis_complete' not in st.session_state:
         st.session_state.analysis_complete = False
+    if 'analysis_progress' not in st.session_state:
+        st.session_state.analysis_progress = 0
 
 # Cache AI detection results
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -172,7 +174,15 @@ def cached_metadata_extraction(image_bytes):
     return extract_metadata(image_bytes)
 
 def main():
-    initialize_session_state()
+    # Initialize session state
+    if 'analysis_results' not in st.session_state:
+        st.session_state.analysis_results = None
+    if 'uploaded_file' not in st.session_state:
+        st.session_state.uploaded_file = None
+    if 'analysis_complete' not in st.session_state:
+        st.session_state.analysis_complete = False
+    if 'analysis_progress' not in st.session_state:
+        st.session_state.analysis_progress = 0
     
     # Header
     st.markdown("""
